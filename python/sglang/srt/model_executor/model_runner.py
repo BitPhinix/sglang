@@ -562,7 +562,7 @@ class ModelRunner:
         # Check memory for tensor parallelism
         local_gpu_memory = get_available_gpu_memory(self.device, self.gpu_id)
         if self.tp_size > 1:
-            if min_per_gpu_memory < local_gpu_memory * 0.9:
+            if min_per_gpu_memory < local_gpu_memory * 0.3:
                 if get_bool_env_var("SGL_DISABLE_TP_MEMORY_INBALANCE_CHECK"):
                     logger.warning(
                         "The memory capacity is unbalanced. Some GPUs may be occupied by other processes. "
@@ -1466,9 +1466,13 @@ class ModelRunner:
         tensor_parallel(self.model, device_mesh)
 
     def forward_decode(
-        self, forward_batch: ForwardBatch, pp_proxy_tensors=None
+        self,
+        forward_batch: ForwardBatch,
+        skip_attn_backend_init: bool = False,
+        pp_proxy_tensors=None,
     ) -> LogitsProcessorOutput:
-        self.attn_backend.init_forward_metadata(forward_batch)
+        if not skip_attn_backend_init:
+            self.attn_backend.init_forward_metadata(forward_batch)
         # FIXME: add pp_proxy_tensors arg to all models
         kwargs = {}
         if self.support_pp:
@@ -1551,8 +1555,18 @@ class ModelRunner:
                 skip_attn_backend_init=skip_attn_backend_init,
                 pp_proxy_tensors=pp_proxy_tensors,
             )
-        elif forward_batch.forward_mode.is_decode():
-            ret = self.forward_decode(forward_batch, pp_proxy_tensors=pp_proxy_tensors)
+            return ret, can_run_cuda_graph
+
+        # For MLP sync
+        if forward_batch.global_num_tokens_cpu is not None:
+            forward_batch.prepare_mlp_sync_batch(self)
+
+        if forward_batch.forward_mode.is_decode():
+            ret = self.forward_decode(
+                forward_batch,
+                skip_attn_backend_init=skip_attn_backend_init,
+                pp_proxy_tensors=pp_proxy_tensors,
+            )
         elif forward_batch.forward_mode.is_extend():
             ret = self.forward_extend(
                 forward_batch,

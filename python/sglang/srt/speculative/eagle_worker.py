@@ -526,6 +526,7 @@ class EAGLEWorker(TpModelWorker):
                 forward_batch
             )
         else:
+            forward_batch.can_run_dp_cuda_graph = False
             if not forward_batch.forward_mode.is_idle():
                 # Initialize attention backend
                 self.draft_attn_backend.init_forward_metadata(forward_batch)
@@ -620,8 +621,8 @@ class EAGLEWorker(TpModelWorker):
             spec_info.hidden_states = hidden_states
 
             # Run forward
-            logits_output = self.draft_model_runner.model.forward(
-                forward_batch.input_ids, forward_batch.positions, forward_batch
+            logits_output, _ = self.draft_model_runner.forward(
+                forward_batch, skip_attn_backend_init=True
             )
             self._detect_nan_if_needed(logits_output)
             probs = torch.softmax(logits_output.next_token_logits, dim=-1)
@@ -873,12 +874,13 @@ class EAGLEWorker(TpModelWorker):
             )
             forward_batch.spec_info.hidden_states = logits_output.hidden_states
         else:
+            forward_batch.can_run_dp_cuda_graph = False
             if not forward_batch.forward_mode.is_idle():
                 self.draft_model_runner.attn_backend.init_forward_metadata(
                     forward_batch
                 )
-            logits_output = self.draft_model_runner.model.forward(
-                forward_batch.input_ids, forward_batch.positions, forward_batch
+            logits_output, _ = self.draft_model_runner.forward(
+                forward_batch, skip_attn_backend_init=True
             )
             self.capture_for_decode(logits_output, forward_batch.spec_info)
 
