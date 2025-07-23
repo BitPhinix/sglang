@@ -592,10 +592,15 @@ class ForwardBatch:
             )
             self.prefix_chunk_kv_indices.append(chunk_kv_indices)
 
-    def _pad_tensor_to_size(self, tensor: torch.Tensor, size: int):
-        return torch.cat(
-            [tensor, tensor.new_zeros(size - tensor.shape[0], *tensor.shape[1:])], dim=0
-        )
+    def _pad_tensor_to_size(self, tensor: torch.Tensor, size: int, *, value: int = 0):
+        if value == 0:
+            return torch.cat(
+                [tensor, tensor.new_zeros(size - tensor.shape[0], *tensor.shape[1:])], dim=0
+            )
+        else:
+            return torch.cat(
+                [tensor, tensor.new_full((size - tensor.shape[0], *tensor.shape[1:]), value)], dim=0
+            )
 
     def prepare_mlp_sync_batch(self, model_runner: ModelRunner):
 
@@ -629,16 +634,18 @@ class ForwardBatch:
         dp_gather_mode = DPGatherMode.get_dp_gather_mode(global_num_tokens)
         self.dp_gather_mode = dp_gather_mode
 
+        # print(f"(rank {get_attention_dp_rank()}) dp_gather_mode: {dp_gather_mode} global_num_tokens: {global_num_tokens} forward_mode: {self.forward_mode}")
+
         if dp_gather_mode.is_all_gather():
             # when DP gather mode is all gather, we will use all_gather_into_tensor to gather hidden states,
             # where transferred tokens should be padded to the same length. 
             max_num_tokens = max(global_num_tokens)
-            max_num_tokens_for_logprob = max(global_num_tokens_for_logprob)
+            # max_num_tokens_for_logprob = max(global_num_tokens_for_logprob)
             # tokens across all ranks should be padded to the same length
             global_num_tokens = [max_num_tokens] * sync_group_size
-            global_num_tokens_for_logprob = [
-                max_num_tokens_for_logprob
-            ] * sync_group_size
+            # global_num_tokens_for_logprob = [
+            #     max_num_tokens_for_logprob
+            # ] * sync_group_size
             buffer_len = max_num_tokens * sync_group_size
         else:
             buffer_len = sum(global_num_tokens)
@@ -652,19 +659,23 @@ class ForwardBatch:
         bs = self.batch_size
         if len(global_num_tokens) > 1:
             num_tokens = global_num_tokens[get_attention_dp_rank()]
-            num_tokens_for_logprob = global_num_tokens_for_logprob[
-                get_attention_dp_rank()
-            ]
+            # num_tokens_for_logprob = global_num_tokens_for_logprob[
+            #     get_attention_dp_rank()
+            # ]
         else:
             num_tokens = global_num_tokens[0]
-            num_tokens_for_logprob = global_num_tokens_for_logprob[0]
+            # num_tokens_for_logprob = global_num_tokens_for_logprob[0]
         
         # padding
         self.input_ids = self._pad_tensor_to_size(self.input_ids, num_tokens)
         self.req_pool_indices = self._pad_tensor_to_size(self.req_pool_indices, bs)
-        self.seq_lens = self._pad_tensor_to_size(self.seq_lens, bs)
+
+
+        seq_len_fill_value = model_runner.attn_backend.get_cuda_graph_seq_len_fill_value()
+        self.seq_lens = self._pad_tensor_to_size(self.seq_lens, bs, value=seq_len_fill_value)
         if self.seq_lens_cpu is not None:
-            self.seq_lens_cpu = self._pad_tensor_to_size(self.seq_lens_cpu, bs)
+            self.seq_lens_cpu = self._pad_tensor_to_size(self.seq_lens_cpu, bs, value=seq_len_fill_value)
+        
         self.out_cache_loc = self._pad_tensor_to_size(
             self.out_cache_loc, num_tokens
         )
@@ -675,14 +686,14 @@ class ForwardBatch:
         self.global_num_tokens_gpu = self.global_num_tokens_gpu.new_tensor(
             global_num_tokens
         )
-        self.global_num_tokens_for_logprob_cpu = (
-            global_num_tokens_for_logprob
-        )
-        self.global_num_tokens_for_logprob_gpu = (
-            self.global_num_tokens_for_logprob_gpu.new_tensor(
-                global_num_tokens_for_logprob
-            )
-        )
+        # self.global_num_tokens_for_logprob_cpu = (
+        #     global_num_tokens_for_logprob
+        # )
+        # self.global_num_tokens_for_logprob_gpu = (
+        #     self.global_num_tokens_for_logprob_gpu.new_tensor(
+        #         global_num_tokens_for_logprob
+        #     )
+        # )
         if self.mrope_positions is not None:
             self.mrope_positions = self._pad_tensor_to_size(self.mrope_positions, bs)
 
