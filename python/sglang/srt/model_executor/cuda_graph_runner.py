@@ -513,7 +513,7 @@ class CudaGraphRunner:
                     device=input_ids.device,
                 )
             )
-            gathered_buffer = self.gathered_buffer[:num_tokens * self.dp_size]
+            gathered_buffer = self.gathered_buffer[: num_tokens * self.dp_size]
         elif self.require_attn_tp_gather:
             self.global_num_tokens_gpu.copy_(
                 torch.tensor(

@@ -205,7 +205,7 @@ class EAGLEDraftExtendCudaGraphRunner:
                     device=self.input_ids.device,
                 )
             )
-            gathered_buffer = self.gathered_buffer[:num_tokens * self.dp_size]
+            gathered_buffer = self.gathered_buffer[: num_tokens * self.dp_size]
         elif self.require_attn_tp_gather:
             self.global_num_tokens_gpu.copy_(
                 torch.tensor(
@@ -361,7 +361,7 @@ class EAGLEDraftExtendCudaGraphRunner:
             spec_info=forward_batch.spec_info,
             seq_lens_cpu=self.seq_lens_cpu,
         )
-        
+
         # Replay
         self.graphs[bs].replay()
         out = self.output_buffers[bs]

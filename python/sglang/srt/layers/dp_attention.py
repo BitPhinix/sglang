@@ -52,7 +52,7 @@ class DPGatherMode(IntEnum):
             return cls.ALL_GATHER
         else:
             return cls.ALL_REDUCE
-    
+
     @classmethod
     def get_default_mode_in_cuda_graph(cls) -> DPGatherMode:
         return cls.ALL_GATHER
@@ -265,7 +265,7 @@ def _dp_gather_via_all_reduce(
         assert (
             local_tokens.untyped_storage() is not global_tokens.untyped_storage()
         ), "aliasing between global_tokens and local_tokens not allowed"
-        
+
         memcpy_triton(
             global_tokens, local_tokens, 0, local_start_pos, local_num_tokens, False
         )
@@ -293,7 +293,9 @@ def _dp_gather_via_all_gather(
     if not is_partial:
         if get_attention_tp_rank() != 0:
             local_tokens.fill_(0)
-    scattered_local_tokens = local_tokens.tensor_split(get_attention_tp_size())[get_attention_tp_rank()]
+    scattered_local_tokens = local_tokens.tensor_split(get_attention_tp_size())[
+        get_attention_tp_rank()
+    ]
     get_attention_tp_group().reduce_scatter_tensor(scattered_local_tokens, local_tokens)
     get_tp_group().all_gather_into_tensor(global_tokens, scattered_local_tokens)
 
@@ -305,9 +307,13 @@ def _dp_gather(
     is_partial: bool,
 ):
     if forward_batch.dp_gather_mode.is_all_gather():
-        _dp_gather_via_all_gather(global_tokens, local_tokens, forward_batch, is_partial)
+        _dp_gather_via_all_gather(
+            global_tokens, local_tokens, forward_batch, is_partial
+        )
     else:
-        _dp_gather_via_all_reduce(global_tokens, local_tokens, forward_batch, is_partial)
+        _dp_gather_via_all_reduce(
+            global_tokens, local_tokens, forward_batch, is_partial
+        )
 
 
 def dp_gather_partial(

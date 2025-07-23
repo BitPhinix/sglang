@@ -27,6 +27,7 @@ from sglang.srt.distributed import (
     tensor_model_parallel_all_gather,
 )
 from sglang.srt.layers.dp_attention import (
+    DPGatherMode,
     attn_tp_all_gather,
     dp_gather_replicate,
     dp_scatter,
@@ -34,7 +35,6 @@ from sglang.srt.layers.dp_attention import (
     get_attention_dp_size,
     get_attention_tp_size,
     get_local_attention_dp_size,
-    DPGatherMode,
 )
 from sglang.srt.layers.vocab_parallel_embedding import VocabParallelEmbedding
 from sglang.srt.managers.schedule_batch import global_server_args_dict

@@ -193,7 +193,7 @@ class EAGLEDraftCudaGraphRunner:
                 )
             )
             global_num_tokens = self.global_num_tokens_gpu
-            gathered_buffer = self.gathered_buffer[:num_tokens * self.dp_size]
+            gathered_buffer = self.gathered_buffer[: num_tokens * self.dp_size]
             global_num_tokens_for_logprob = self.global_num_tokens_for_logprob_gpu
         elif self.require_attn_tp_gather:
             self.global_num_tokens_gpu.copy_(

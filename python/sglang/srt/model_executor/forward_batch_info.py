@@ -595,11 +595,16 @@ class ForwardBatch:
     def _pad_tensor_to_size(self, tensor: torch.Tensor, size: int, *, value: int = 0):
         if value == 0:
             return torch.cat(
-                [tensor, tensor.new_zeros(size - tensor.shape[0], *tensor.shape[1:])], dim=0
+                [tensor, tensor.new_zeros(size - tensor.shape[0], *tensor.shape[1:])],
+                dim=0,
             )
         else:
             return torch.cat(
-                [tensor, tensor.new_full((size - tensor.shape[0], *tensor.shape[1:]), value)], dim=0
+                [
+                    tensor,
+                    tensor.new_full((size - tensor.shape[0], *tensor.shape[1:]), value),
+                ],
+                dim=0,
             )
 
     def prepare_mlp_sync_batch(self, model_runner: ModelRunner):
@@ -616,14 +621,16 @@ class ForwardBatch:
         for i in range(sync_group_size):
             # make sure that the padded length is divisible by attn_tp_size because we may need reduce-scatter across attn_tp dim.
             # there is no reduce-scatter in LM logprob, so we do not need to adjust the padded length for logprob
-            global_num_tokens[i] = ((global_num_tokens[i] - 1) // attn_tp_size + 1) * attn_tp_size
+            global_num_tokens[i] = (
+                (global_num_tokens[i] - 1) // attn_tp_size + 1
+            ) * attn_tp_size
 
         dp_gather_mode = DPGatherMode.get_dp_gather_mode(global_num_tokens)
         self.dp_gather_mode = dp_gather_mode
 
         if dp_gather_mode.is_all_gather():
             # when DP gather mode is all gather, we will use all_gather_into_tensor to gather hidden states,
-            # where transferred tokens should be padded to the same length. 
+            # where transferred tokens should be padded to the same length.
             max_num_tokens = max(global_num_tokens)
             global_num_tokens = [max_num_tokens] * sync_group_size
             buffer_len = max_num_tokens * sync_group_size
@@ -635,25 +642,29 @@ class ForwardBatch:
             dtype=model_runner.dtype,
             device=model_runner.device,
         )
-        
+
         bs = self.batch_size
         if len(global_num_tokens) > 1:
             num_tokens = global_num_tokens[get_attention_dp_rank()]
         else:
             num_tokens = global_num_tokens[0]
-        
+
         # padding
         self.input_ids = self._pad_tensor_to_size(self.input_ids, num_tokens)
         self.req_pool_indices = self._pad_tensor_to_size(self.req_pool_indices, bs)
 
-        seq_len_fill_value = model_runner.attn_backend.get_cuda_graph_seq_len_fill_value()
-        self.seq_lens = self._pad_tensor_to_size(self.seq_lens, bs, value=seq_len_fill_value)
-        if self.seq_lens_cpu is not None:
-            self.seq_lens_cpu = self._pad_tensor_to_size(self.seq_lens_cpu, bs, value=seq_len_fill_value)
-        
-        self.out_cache_loc = self._pad_tensor_to_size(
-            self.out_cache_loc, num_tokens
+        seq_len_fill_value = (
+            model_runner.attn_backend.get_cuda_graph_seq_len_fill_value()
         )
+        self.seq_lens = self._pad_tensor_to_size(
+            self.seq_lens, bs, value=seq_len_fill_value
+        )
+        if self.seq_lens_cpu is not None:
+            self.seq_lens_cpu = self._pad_tensor_to_size(
+                self.seq_lens_cpu, bs, value=seq_len_fill_value
+            )
+
+        self.out_cache_loc = self._pad_tensor_to_size(self.out_cache_loc, num_tokens)
         if self.encoder_lens is not None:
             self.encoder_lens = self._pad_tensor_to_size(self.encoder_lens, bs)
         self.positions = self._pad_tensor_to_size(self.positions, num_tokens)
@@ -666,13 +677,9 @@ class ForwardBatch:
             self.mrope_positions = self._pad_tensor_to_size(self.mrope_positions, bs)
 
         if self.extend_seq_lens is not None:
-            self.extend_seq_lens = self._pad_tensor_to_size(
-                self.extend_seq_lens, bs
-            )
+            self.extend_seq_lens = self._pad_tensor_to_size(self.extend_seq_lens, bs)
 
-        if self.spec_info is not None and isinstance(
-            self.spec_info, EagleDraftInput
-        ):
+        if self.spec_info is not None and isinstance(self.spec_info, EagleDraftInput):
             spec_info = self.spec_info
             self.output_cache_loc_backup = self.out_cache_loc
             self.hidden_states_backup = spec_info.hidden_states
@@ -689,26 +696,30 @@ class ForwardBatch:
             spec_info.hidden_states = self._pad_tensor_to_size(
                 spec_info.hidden_states, num_tokens
             )
-    
+
     def post_forward_mlp_sync_batch(self, logits_output: LogitsProcessorOutput):
-        
+
         bs = self.batch_size
-        
+
         if self.spec_info is not None:
-            if self.forward_mode.is_decode(): # draft
+            if self.forward_mode.is_decode():  # draft
                 num_tokens = self.hidden_states_backup.shape[0]
                 self.positions = self.positions[:num_tokens]
                 self.seq_lens = self.seq_lens[:bs]
                 self.req_pool_indices = self.req_pool_indices[:bs]
                 if self.seq_lens_cpu is not None:
                     self.seq_lens_cpu = self.seq_lens_cpu[:bs]
-                logits_output.next_token_logits = logits_output.next_token_logits[:num_tokens]
+                logits_output.next_token_logits = logits_output.next_token_logits[
+                    :num_tokens
+                ]
                 logits_output.hidden_states = logits_output.hidden_states[:num_tokens]
-            elif self.forward_mode.is_target_verify(): # verify
+            elif self.forward_mode.is_target_verify():  # verify
                 num_tokens = bs * self.spec_info.draft_token_num
-                logits_output.next_token_logits = logits_output.next_token_logits[:num_tokens]
+                logits_output.next_token_logits = logits_output.next_token_logits[
+                    :num_tokens
+                ]
                 logits_output.hidden_states = logits_output.hidden_states[:num_tokens]
-            elif self.forward_mode.is_draft_extend(): # draft extend
+            elif self.forward_mode.is_draft_extend():  # draft extend
                 self.spec_info.accept_length = self.spec_info.accept_length[:bs]
                 logits_output.next_token_logits = logits_output.next_token_logits[:bs]
                 logits_output.hidden_states = logits_output.hidden_states[:bs]
@@ -727,7 +738,9 @@ class ForwardBatch:
                 logits_output.hidden_states = logits_output.hidden_states[:bs]
         elif self.forward_mode.is_extend():
             num_tokens = self.seq_lens_sum
-            logits_output.next_token_logits = logits_output.next_token_logits[:num_tokens]
+            logits_output.next_token_logits = logits_output.next_token_logits[
+                :num_tokens
+            ]
             if logits_output.hidden_states is not None:
                 logits_output.hidden_states = logits_output.hidden_states[:num_tokens]
 
