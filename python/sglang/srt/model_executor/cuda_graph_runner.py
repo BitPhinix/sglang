@@ -644,12 +644,13 @@ class CudaGraphRunner:
 
         # Pad
         if self.require_mlp_tp_gather:
-            total_batch_size = (
-                max(forward_batch.global_num_tokens_cpu) / self.num_tokens_per_bs
+            max_num_tokens = max(forward_batch.global_num_tokens_cpu)
+            max_batch_size = (
+                max_num_tokens / self.num_tokens_per_bs
                 if self.model_runner.spec_algorithm.is_eagle()
-                else max(forward_batch.global_num_tokens_cpu)
+                else max_num_tokens
             )
-            index = bisect.bisect_left(self.capture_bs, total_batch_size)
+            index = bisect.bisect_left(self.capture_bs, max_batch_size)
         else:
             index = bisect.bisect_left(self.capture_bs, raw_bs)
         bs = self.capture_bs[index]
@@ -679,7 +680,7 @@ class CudaGraphRunner:
         if forward_batch.mrope_positions is not None:
             self.mrope_positions[:, :raw_bs].copy_(forward_batch.mrope_positions)
         if self.require_gathered_buffer:
-            self.global_num_tokens_gpu.copy_(forward_batch.global_num_tokens_gpu)
+            self.global_num_tokens_gpu.fill_(bs * self.num_tokens_per_bs)
         if enable_num_token_non_padded(self.model_runner.server_args):
             self.num_token_non_padded.copy_(forward_batch.num_token_non_padded)
         if self.enable_two_batch_overlap:
