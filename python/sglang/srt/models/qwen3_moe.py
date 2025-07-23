@@ -189,8 +189,7 @@ class Qwen3MoeSparseMoeBlock(nn.Module):
     def forward_deepep(
         self, hidden_states: torch.Tensor, forward_batch: ForwardBatch
     ) -> torch.Tensor:
-        forward_mode = forward_batch.forward_mode
-        if is_non_idle_and_non_empty(forward_mode, hidden_states):
+        if hidden_states.shape[0] > 0:
             # router_logits: (num_tokens, n_experts)
             router_logits, _ = self.gate(hidden_states)
             topk_weights, topk_idx, _ = self.topk(

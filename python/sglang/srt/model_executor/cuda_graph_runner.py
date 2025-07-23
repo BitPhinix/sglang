@@ -337,6 +337,10 @@ class CudaGraphRunner:
                         ),
                         dtype=self.model_runner.dtype,
                     )
+            else:
+                self.global_num_tokens_gpu = None
+                self.global_num_tokens_for_logprob_gpu = None
+                self.gathered_buffer = None
 
             self.custom_mask = torch.ones(
                 (
