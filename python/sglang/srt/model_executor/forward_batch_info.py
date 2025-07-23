@@ -663,6 +663,8 @@ class ForwardBatch:
         self.input_ids = self._pad_tensor_to_size(self.input_ids, num_tokens)
         self.req_pool_indices = self._pad_tensor_to_size(self.req_pool_indices, bs)
         self.seq_lens = self._pad_tensor_to_size(self.seq_lens, bs)
+        if self.seq_lens_cpu is not None:
+            self.seq_lens_cpu = self._pad_tensor_to_size(self.seq_lens_cpu, bs)
         self.out_cache_loc = self._pad_tensor_to_size(
             self.out_cache_loc, num_tokens
         )
@@ -729,15 +731,13 @@ class ForwardBatch:
                 self.spec_info.accept_length = self.spec_info.accept_length[:bs]
                 logits_output.next_token_logits = logits_output.next_token_logits[:bs]
                 logits_output.hidden_states = logits_output.hidden_states[:bs]
-                if getattr(logits_output, "topk_p", None) is not None:
-                    logits_output.topk_p = logits_output.topk_p[:bs]
-                if getattr(logits_output, "topk_index", None) is not None:
-                    logits_output.topk_index = logits_output.topk_index[:bs]
-            # elif self.forward_mode.is_extend():
-            #     num_tokens = self.seq_lens_sum
+            elif self.forward_mode.is_extend():
+                logits_output.next_token_logits = logits_output.next_token_logits[:bs]
+                logits_output.hidden_states = logits_output.hidden_states[:bs]
         elif self.forward_mode.is_decode() or self.forward_mode.is_extend():
             logits_output.next_token_logits = logits_output.next_token_logits[:bs]
-            logits_output.hidden_states = logits_output.hidden_states[:bs]
+            if logits_output.hidden_states is not None:
+                logits_output.hidden_states = logits_output.hidden_states[:bs]
         # elif self.forward_mode.is_extend():
         #     pass
 
