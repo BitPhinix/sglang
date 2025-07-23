@@ -166,13 +166,16 @@ def get_batch_sizes_to_capture(model_runner: ModelRunner):
         # In some cases (e.g., with a small GPU or --max-running-requests), the #max-running-requests
         # is very small. We add more values here to make sure we capture the maximum bs.
         capture_bs += [model_runner.req_to_token_pool.size]
+    
+    mul_base = 1
 
     if server_args.enable_two_batch_overlap:
-        capture_bs = [bs for bs in capture_bs if bs % 2 == 0]
+        mul_base *= 2
 
     if require_gathered_buffer(server_args):
-        attn_tp_size = get_attention_tp_size()
-        capture_bs = [bs for bs in capture_bs if bs % attn_tp_size == 0]
+        mul_base *= get_attention_tp_size()
+    
+    capture_bs = [bs for bs in capture_bs if bs % mul_base == 0]
 
     if server_args.cuda_graph_max_bs:
         capture_bs = [bs for bs in capture_bs if bs <= server_args.cuda_graph_max_bs]
