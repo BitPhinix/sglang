@@ -392,7 +392,7 @@ class ForwardBatch:
             ).to(device, non_blocking=True)
 
         if ret.forward_mode.is_idle():
-            ret.positions = torch.empty((0,), device=device)
+            ret.positions = torch.empty((0,), dtype=torch.int64, device=device)
             TboForwardBatchPreparer.prepare(
                 ret, is_draft_worker=model_runner.is_draft_worker
             )
