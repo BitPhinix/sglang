@@ -23,6 +23,8 @@ from sglang.srt.model_executor.forward_batch_info import (
 )
 from sglang.srt.speculative.eagle_utils import EagleDraftInput, fast_topk
 from sglang.srt.utils import (
+    set_is_cuda_graph_draft_extend,
+    unset_is_cuda_graph_draft_extend,
     require_attn_tp_gather,
     require_gathered_buffer,
     require_mlp_sync,
@@ -195,14 +197,12 @@ class EAGLEDraftExtendCudaGraphRunner:
             )
             self.global_num_tokens_for_logprob_gpu.copy_(
                 torch.tensor(
-                    [num_tokens] * self.dp_size,
+                    [bs] * self.dp_size,
                     dtype=torch.int32,
                     device=self.input_ids.device,
                 )
             )
-            global_num_tokens = self.global_num_tokens_gpu
             gathered_buffer = self.gathered_buffer[:num_tokens * self.dp_size]
-            global_num_tokens_for_logprob = self.global_num_tokens_for_logprob_gpu
         elif self.require_attn_tp_gather:
             self.global_num_tokens_gpu.copy_(
                 torch.tensor(
@@ -213,18 +213,16 @@ class EAGLEDraftExtendCudaGraphRunner:
             )
             self.global_num_tokens_for_logprob_gpu.copy_(
                 torch.tensor(
-                    [num_tokens],
+                    [bs],
                     dtype=torch.int32,
                     device=self.input_ids.device,
                 )
             )
-            global_num_tokens = self.global_num_tokens_gpu
             gathered_buffer = self.gathered_buffer[:num_tokens]
-            global_num_tokens_for_logprob = self.global_num_tokens_for_logprob_gpu
         else:
-            global_num_tokens = None
             gathered_buffer = None
-            global_num_tokens_for_logprob = None
+        
+        # print(f"(rank {torch.distributed.get_rank()}) global_num_tokens: {self.global_num_tokens_gpu, self.global_num_tokens_for_logprob_gpu}, num_tokens: {num_tokens}, gathered_buffer: {gathered_buffer.shape}")
 
         spec_info = EagleDraftInput(
             hidden_states=hidden_states,
@@ -245,9 +243,9 @@ class EAGLEDraftExtendCudaGraphRunner:
             seq_lens_sum=seq_lens.sum().item(),
             return_logprob=False,
             positions=positions,
-            global_num_tokens_gpu=global_num_tokens,
+            global_num_tokens_gpu=self.global_num_tokens_gpu,
+            global_num_tokens_for_logprob_gpu=self.global_num_tokens_for_logprob_gpu,
             dp_gather_mode=DPGatherMode.get_default_mode_in_cuda_graph(),
-            global_num_tokens_for_logprob_gpu=global_num_tokens_for_logprob,
             gathered_buffer=gathered_buffer,
             spec_algorithm=self.model_runner.spec_algorithm,
             spec_info=spec_info,
@@ -256,6 +254,8 @@ class EAGLEDraftExtendCudaGraphRunner:
             extend_seq_lens=extend_seq_lens,
             padded_static_len=self.padded_static_len,
         )
+        
+        # print(self.global_num_tokens_for_logprob_gpu)
 
         self.eagle_worker.draft_extend_attn_backend.init_forward_metadata_capture_cuda_graph(
             bs=bs,
@@ -271,6 +271,7 @@ class EAGLEDraftExtendCudaGraphRunner:
         def run_once():
             # Clean intermediate result cache for DP attention
             forward_batch.dp_local_start_pos = forward_batch.dp_local_num_tokens = None
+            # set_is_cuda_graph_draft_extend()
 
             # Backup two fields, which will be modified in-place in `draft_forward`.
             output_cache_loc_backup = forward_batch.out_cache_loc
@@ -283,6 +284,7 @@ class EAGLEDraftExtendCudaGraphRunner:
             )
             probs = torch.softmax(ret.next_token_logits, dim=-1)
             ret.topk_p, ret.topk_index = fast_topk(probs, self.topk, dim=-1)
+            # unset_is_cuda_graph_draft_extend()
             
             # assert output_cache_loc_backup is not forward_batch.out_cache_loc
             # assert hidden_states_backup is not forward_batch.spec_info.hidden_states
@@ -301,7 +303,6 @@ class EAGLEDraftExtendCudaGraphRunner:
             graph, pool=get_global_graph_memory_pool(), stream=stream
         ):
             out = run_once()
-
         set_global_graph_memory_pool(graph.pool())
         return graph, out
 
@@ -343,7 +344,7 @@ class EAGLEDraftExtendCudaGraphRunner:
 
         if self.require_gathered_buffer:
             self.global_num_tokens_gpu.fill_(bs * self.num_tokens_per_bs)
-            self.global_num_tokens_for_logprob_gpu.fill_(bs * self.num_tokens_per_bs)
+            self.global_num_tokens_for_logprob_gpu.fill_(bs)
             # TODO: support num_token_non_padded
             # forward_batch.gathered_buffer = self.gathered_buffer
 
@@ -367,6 +368,8 @@ class EAGLEDraftExtendCudaGraphRunner:
             spec_info=forward_batch.spec_info,
             seq_lens_cpu=self.seq_lens_cpu,
         )
+        
+        # print(f"(rank {torch.distributed.get_rank()}) num_tokens: {num_tokens}, bs: {bs}, global_num_tokens_gpu: {self.global_num_tokens_gpu}, global_num_tokens_for_logprob_gpu: {self.global_num_tokens_for_logprob_gpu}")
 
         # Replay
         self.graphs[bs].replay()

@@ -314,6 +314,9 @@ class CudaGraphRunner:
                     self.global_num_tokens_gpu = torch.zeros(
                         (self.dp_size,), dtype=torch.int32
                     )
+                    self.global_num_tokens_for_logprob_gpu = torch.zeros(
+                        (self.dp_size,), dtype=torch.int32
+                    )
                     self.gathered_buffer = torch.zeros(
                         (
                             self.max_num_token * self.dp_size,
@@ -324,6 +327,9 @@ class CudaGraphRunner:
                 else:
                     assert self.require_attn_tp_gather
                     self.global_num_tokens_gpu = torch.zeros((1,), dtype=torch.int32)
+                    self.global_num_tokens_for_logprob_gpu = torch.zeros(
+                        (1,), dtype=torch.int32
+                    )
                     self.gathered_buffer = torch.zeros(
                         (
                             self.max_num_token,
@@ -496,7 +502,13 @@ class CudaGraphRunner:
                     device=input_ids.device,
                 )
             )
-            global_num_tokens = self.global_num_tokens_gpu
+            self.global_num_tokens_for_logprob_gpu.copy_(
+                torch.tensor(
+                    [num_tokens] * self.dp_size,
+                    dtype=torch.int32,
+                    device=input_ids.device,
+                )
+            )
             gathered_buffer = self.gathered_buffer[:num_tokens * self.dp_size]
         elif self.require_attn_tp_gather:
             self.global_num_tokens_gpu.copy_(
@@ -506,10 +518,15 @@ class CudaGraphRunner:
                     device=input_ids.device,
                 )
             )
-            global_num_tokens = self.global_num_tokens_gpu
+            self.global_num_tokens_for_logprob_gpu.copy_(
+                torch.tensor(
+                    [num_tokens],
+                    dtype=torch.int32,
+                    device=input_ids.device,
+                )
+            )
             gathered_buffer = self.gathered_buffer[:num_tokens]
         else:
-            global_num_tokens = None
             gathered_buffer = None
 
         spec_info = self.get_spec_info(num_tokens)
@@ -539,7 +556,8 @@ class CudaGraphRunner:
             encoder_lens=encoder_lens,
             return_logprob=False,
             positions=positions,
-            global_num_tokens_gpu=global_num_tokens,
+            global_num_tokens_gpu=self.global_num_tokens_gpu,
+            global_num_tokens_for_logprob_gpu=self.global_num_tokens_for_logprob_gpu,
             dp_gather_mode=DPGatherMode.get_default_mode_in_cuda_graph(),
             gathered_buffer=gathered_buffer,
             mrope_positions=mrope_positions,
@@ -681,6 +699,7 @@ class CudaGraphRunner:
             self.mrope_positions[:, :raw_bs].copy_(forward_batch.mrope_positions)
         if self.require_gathered_buffer:
             self.global_num_tokens_gpu.fill_(bs * self.num_tokens_per_bs)
+            self.global_num_tokens_for_logprob_gpu.fill_(bs * self.num_tokens_per_bs)
         if enable_num_token_non_padded(self.model_runner.server_args):
             self.num_token_non_padded.copy_(forward_batch.num_token_non_padded)
         if self.enable_two_batch_overlap:

@@ -93,6 +93,20 @@ time_infos = {}
 HIP_FP8_E4M3_FNUZ_MAX = 224.0
 
 
+IS_CUDA_GRAPH_DRAFT_EXTEND = False
+
+def set_is_cuda_graph_draft_extend():
+    global IS_CUDA_GRAPH_DRAFT_EXTEND
+    IS_CUDA_GRAPH_DRAFT_EXTEND = True
+
+def unset_is_cuda_graph_draft_extend():
+    global IS_CUDA_GRAPH_DRAFT_EXTEND
+    IS_CUDA_GRAPH_DRAFT_EXTEND = False
+
+def is_cuda_graph_draft_extend():
+    global IS_CUDA_GRAPH_DRAFT_EXTEND
+    return IS_CUDA_GRAPH_DRAFT_EXTEND
+
 # https://pytorch.org/docs/stable/notes/hip.html#checking-for-hip
 def is_hip() -> bool:
     return torch.version.hip is not None

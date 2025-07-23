@@ -169,9 +169,9 @@ class LogitsMetadata:
         )
 
     def compute_dp_attention_metadata(self, hidden_states: torch.Tensor):
-        if self.global_num_tokens_for_logprob_cpu is None:
-            # we are capturing cuda graph
-            return
+        # if self.global_num_tokens_for_logprob_cpu is None:
+        #     # we are capturing cuda graph
+        #     return
 
         cumtokens = torch.cumsum(self.global_num_tokens_for_logprob_gpu, dim=0)
         dp_rank = get_attention_dp_rank()
@@ -182,18 +182,18 @@ class LogitsMetadata:
         else:
             dp_local_start_pos = cumtokens[dp_rank - 1]
         dp_local_num_tokens = self.global_num_tokens_for_logprob_gpu[dp_rank]
-        gathered_buffer = torch.zeros(
-            (
-                sum(self.global_num_tokens_for_logprob_cpu),
-                hidden_states.shape[1],
-            ),
-            dtype=hidden_states.dtype,
-            device=hidden_states.device,
-        )
+        # gathered_buffer = torch.zeros(
+        #     (
+        #         sum(self.global_num_tokens_for_logprob_cpu),
+        #         hidden_states.shape[1],
+        #     ),
+        #     dtype=hidden_states.dtype,
+        #     device=hidden_states.device,
+        # )
 
         self.dp_local_start_pos = dp_local_start_pos
         self.dp_local_num_tokens = dp_local_num_tokens
-        self.gathered_buffer = gathered_buffer
+        # self.gathered_buffer = gathered_buffer
 
 
 class LogitsProcessor(nn.Module):
