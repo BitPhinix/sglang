@@ -297,6 +297,7 @@ class EAGLEDraftExtendCudaGraphRunner:
             graph, pool=get_global_graph_memory_pool(), stream=stream
         ):
             out = run_once()
+
         set_global_graph_memory_pool(graph.pool())
         return graph, out
 

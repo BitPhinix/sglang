@@ -563,7 +563,6 @@ class DeepseekV2MoE(nn.Module):
                     layer_id=self.layer_id,
                 ),
             )
-            # print(f"(rank {torch.distributed.get_rank()}) hidden_states.shape: {hidden_states.shape}, topk_idx.shape: {topk_idx.shape}, topk_weights.shape: {topk_weights.shape}")
         else:
             topk_idx = torch.full(
                 (0, self.top_k), -1, dtype=torch.int, device=hidden_states.device
