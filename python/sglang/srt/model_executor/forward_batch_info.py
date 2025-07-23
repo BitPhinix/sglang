@@ -53,6 +53,7 @@ from sglang.srt.utils import (
 
 if TYPE_CHECKING:
     from sglang.srt.layers.attention.base_attn_backend import AttentionBackend
+    from sglang.srt.layers.logits_processor import LogitsProcessorOutput
     from sglang.srt.managers.schedule_batch import ModelWorkerBatch, MultimodalInputs
     from sglang.srt.mem_cache.memory_pool import KVCache, ReqToTokenPool
     from sglang.srt.model_executor.model_runner import ModelRunner
@@ -598,7 +599,7 @@ class ForwardBatch:
 
     def prepare_mlp_sync_batch(self, model_runner: ModelRunner):
 
-        from sglang.srt.speculative.eagle_utils import EagleDraftInput, EagleVerifyInput
+        from sglang.srt.speculative.eagle_utils import EagleDraftInput
 
         assert self.global_num_tokens_cpu is not None
         assert self.global_num_tokens_for_logprob_cpu is not None
@@ -705,6 +706,40 @@ class ForwardBatch:
             spec_info.hidden_states = self._pad_tensor_to_size(
                 spec_info.hidden_states, num_tokens
             )
+    
+    def post_forward_mlp_sync_batch(self, model_runner: ModelRunner, logits_output: LogitsProcessorOutput):
+        
+        # TODO: need update after refactor
+
+        bs = self.batch_size
+        
+        if self.spec_info is not None:
+            if self.forward_mode.is_decode(): # draft
+                num_tokens = bs * self.spec_info.num_tokens_per_batch
+                self.positions = self.positions[:num_tokens]
+                self.seq_lens = self.seq_lens[:bs]
+                self.req_pool_indices = self.req_pool_indices[:bs]
+                if self.seq_lens_cpu is not None:
+                    self.seq_lens_cpu = self.seq_lens_cpu[:bs]
+            elif self.forward_mode.is_target_verify(): # verify
+                num_tokens = bs * self.spec_info.draft_token_num
+                logits_output.next_token_logits = logits_output.next_token_logits[:num_tokens]
+                logits_output.hidden_states = logits_output.hidden_states[:num_tokens]
+            elif self.forward_mode.is_draft_extend(): # draft extend
+                self.spec_info.accept_length = self.spec_info.accept_length[:bs]
+                logits_output.next_token_logits = logits_output.next_token_logits[:bs]
+                logits_output.hidden_states = logits_output.hidden_states[:bs]
+                if getattr(logits_output, "topk_p", None) is not None:
+                    logits_output.topk_p = logits_output.topk_p[:bs]
+                if getattr(logits_output, "topk_index", None) is not None:
+                    logits_output.topk_index = logits_output.topk_index[:bs]
+            # elif self.forward_mode.is_extend():
+            #     num_tokens = self.seq_lens_sum
+        elif self.forward_mode.is_decode() or self.forward_mode.is_extend():
+            logits_output.next_token_logits = logits_output.next_token_logits[:bs]
+            logits_output.hidden_states = logits_output.hidden_states[:bs]
+        # elif self.forward_mode.is_extend():
+        #     pass
 
     # Here we suppose the length of each chunk is equal
     # For example, if we have 4 sequences with prefix length [256, 512, 768, 1024], prefix_chunk_len = 256

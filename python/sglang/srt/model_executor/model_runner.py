@@ -1614,6 +1614,9 @@ class ModelRunner:
         else:
             raise ValueError(f"Invalid forward mode: {forward_batch.forward_mode}")
 
+        if forward_batch.global_num_tokens_cpu is not None:
+            forward_batch.post_forward_mlp_sync_batch(self, ret)
+
         return ret, can_run_cuda_graph
 
     def _preprocess_logits(
