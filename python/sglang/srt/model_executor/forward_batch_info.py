@@ -734,12 +734,15 @@ class ForwardBatch:
             elif self.forward_mode.is_extend():
                 logits_output.next_token_logits = logits_output.next_token_logits[:bs]
                 logits_output.hidden_states = logits_output.hidden_states[:bs]
-        elif self.forward_mode.is_decode() or self.forward_mode.is_extend():
+        elif self.forward_mode.is_decode() or self.forward_mode.is_idle():
             logits_output.next_token_logits = logits_output.next_token_logits[:bs]
             if logits_output.hidden_states is not None:
                 logits_output.hidden_states = logits_output.hidden_states[:bs]
-        # elif self.forward_mode.is_extend():
-        #     pass
+        elif self.forward_mode.is_extend():
+            num_tokens = self.seq_lens_sum
+            logits_output.next_token_logits = logits_output.next_token_logits[:num_tokens]
+            if logits_output.hidden_states is not None:
+                logits_output.hidden_states = logits_output.hidden_states[:num_tokens]
 
     # Here we suppose the length of each chunk is equal
     # For example, if we have 4 sequences with prefix length [256, 512, 768, 1024], prefix_chunk_len = 256

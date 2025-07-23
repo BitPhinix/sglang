@@ -294,7 +294,6 @@ def _dp_gather_via_all_gather(
         if get_attention_tp_rank() != 0:
             local_tokens.fill_(0)
     scattered_local_tokens = local_tokens.tensor_split(get_attention_tp_size())[get_attention_tp_rank()]
-    print(f"scattered_local_tokens: {scattered_local_tokens.shape}, local_tokens: {local_tokens.shape}")
     get_attention_tp_group().reduce_scatter_tensor(scattered_local_tokens, local_tokens)
     get_tp_group().all_gather_into_tensor(global_tokens, scattered_local_tokens)
 
@@ -343,6 +342,8 @@ def dp_scatter(
         assert (
             local_tokens.untyped_storage() is not global_tokens.untyped_storage()
         ), "aliasing between local_tokens and global_tokens not allowed"
+        
+        # print(f"local_tokens: {local_tokens.shape}, global_tokens: {global_tokens.shape}, local_start_pos: {local_start_pos}, local_num_tokens: {local_num_tokens}")
 
         memcpy_triton(
             local_tokens, global_tokens, 0, local_start_pos, local_num_tokens, True
