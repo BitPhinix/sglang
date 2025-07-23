@@ -610,22 +610,9 @@ class ForwardBatch:
         assert self.global_num_tokens_for_logprob_cpu is not None
 
         global_num_tokens = self.global_num_tokens_cpu
-        global_num_tokens_for_logprob = self.global_num_tokens_for_logprob_cpu
         sync_group_size = len(global_num_tokens)
         attn_tp_size = get_attention_tp_size()
 
-        """
-            # get batch size
-            if self.spec_info is not None:
-                if isinstance(self.spec_info, EagleDraftInput):
-                    bs = num_tokens // self.spec_info.num_tokens_per_batch
-                else:
-                    assert isinstance(self.spec_info, EagleVerifyInput)
-                    bs = num_tokens // self.spec_info.draft_token_num
-            else:
-                bs = num_tokens
-        """
-        
         for i in range(sync_group_size):
             # make sure that the padded length is divisible by attn_tp_size because we may need reduce-scatter across attn_tp dim.
             # there is no reduce-scatter in LM logprob, so we do not need to adjust the padded length for logprob
@@ -634,18 +621,11 @@ class ForwardBatch:
         dp_gather_mode = DPGatherMode.get_dp_gather_mode(global_num_tokens)
         self.dp_gather_mode = dp_gather_mode
 
-        # print(f"(rank {get_attention_dp_rank()}) dp_gather_mode: {dp_gather_mode} global_num_tokens: {global_num_tokens} forward_mode: {self.forward_mode}")
-
         if dp_gather_mode.is_all_gather():
             # when DP gather mode is all gather, we will use all_gather_into_tensor to gather hidden states,
             # where transferred tokens should be padded to the same length. 
             max_num_tokens = max(global_num_tokens)
-            # max_num_tokens_for_logprob = max(global_num_tokens_for_logprob)
-            # tokens across all ranks should be padded to the same length
             global_num_tokens = [max_num_tokens] * sync_group_size
-            # global_num_tokens_for_logprob = [
-            #     max_num_tokens_for_logprob
-            # ] * sync_group_size
             buffer_len = max_num_tokens * sync_group_size
         else:
             buffer_len = sum(global_num_tokens)
@@ -681,14 +661,7 @@ class ForwardBatch:
         self.global_num_tokens_gpu = self.global_num_tokens_gpu.new_tensor(
             global_num_tokens
         )
-        # self.global_num_tokens_for_logprob_cpu = (
-        #     global_num_tokens_for_logprob
-        # )
-        # self.global_num_tokens_for_logprob_gpu = (
-        #     self.global_num_tokens_for_logprob_gpu.new_tensor(
-        #         global_num_tokens_for_logprob
-        #     )
-        # )
+
         if self.mrope_positions is not None:
             self.mrope_positions = self._pad_tensor_to_size(self.mrope_positions, bs)
 
@@ -717,16 +690,13 @@ class ForwardBatch:
                 spec_info.hidden_states, num_tokens
             )
     
-    def post_forward_mlp_sync_batch(self, model_runner: ModelRunner, logits_output: LogitsProcessorOutput):
+    def post_forward_mlp_sync_batch(self, logits_output: LogitsProcessorOutput):
         
-        # TODO: need update after refactor
-
         bs = self.batch_size
         
         if self.spec_info is not None:
             if self.forward_mode.is_decode(): # draft
                 num_tokens = self.hidden_states_backup.shape[0]
-                # num_tokens = bs * self.spec_info.num_tokens_per_batch
                 self.positions = self.positions[:num_tokens]
                 self.seq_lens = self.seq_lens[:bs]
                 self.req_pool_indices = self.req_pool_indices[:bs]

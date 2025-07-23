@@ -168,10 +168,9 @@ class LogitsMetadata:
             dp_gather_mode=DPGatherMode.ALL_REDUCE,
         )
 
-    def compute_dp_attention_metadata(self, hidden_states: torch.Tensor):
-        # if self.global_num_tokens_for_logprob_cpu is None:
-        #     # we are capturing cuda graph
-        #     return
+    def compute_dp_attention_metadata(self):
+        # TODO(ch-wan): gathered_buffer here is larger than the actual required size in draft extend,
+        # we may use a smaller buffer in draft extend.
 
         cumtokens = torch.cumsum(self.global_num_tokens_for_logprob_gpu, dim=0)
         dp_rank = get_attention_dp_rank()
@@ -182,18 +181,9 @@ class LogitsMetadata:
         else:
             dp_local_start_pos = cumtokens[dp_rank - 1]
         dp_local_num_tokens = self.global_num_tokens_for_logprob_gpu[dp_rank]
-        # gathered_buffer = torch.zeros(
-        #     (
-        #         sum(self.global_num_tokens_for_logprob_cpu),
-        #         hidden_states.shape[1],
-        #     ),
-        #     dtype=hidden_states.dtype,
-        #     device=hidden_states.device,
-        # )
 
         self.dp_local_start_pos = dp_local_start_pos
         self.dp_local_num_tokens = dp_local_num_tokens
-        # self.gathered_buffer = gathered_buffer
 
 
 class LogitsProcessor(nn.Module):
@@ -437,7 +427,7 @@ class LogitsProcessor(nn.Module):
         guarantee the given hidden_states follow this constraint.
         """
         if self.do_tensor_parallel_all_gather_dp_attn:
-            logits_metadata.compute_dp_attention_metadata(hidden_states)
+            logits_metadata.compute_dp_attention_metadata()
             hidden_states, local_hidden_states = (
                 torch.empty_like(logits_metadata.gathered_buffer),
                 hidden_states,

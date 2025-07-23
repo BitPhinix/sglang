@@ -324,11 +324,10 @@ class EAGLEDraftCudaGraphRunner:
         self.topk_index[:raw_bs].copy_(forward_batch.spec_info.topk_index)
         self.hidden_states[:raw_bs].copy_(forward_batch.spec_info.hidden_states)
 
+        # TODO(ch-wan): support num_token_non_padded
         if self.require_gathered_buffer:
             self.global_num_tokens_gpu.fill_(bs * self.num_tokens_per_bs)
             self.global_num_tokens_for_logprob_gpu.fill_(bs * self.num_tokens_per_bs)
-            # TODO: support num_token_non_padded
-            # forward_batch.gathered_buffer = self.gathered_buffer
 
         # Attention backend
         if bs != raw_bs:

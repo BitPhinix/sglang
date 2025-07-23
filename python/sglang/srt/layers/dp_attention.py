@@ -10,7 +10,6 @@ import torch
 import triton
 import triton.language as tl
 
-from sglang.srt.utils import is_cuda_graph_draft_extend
 from sglang.srt.distributed import (
     GroupCoordinator,
     get_tensor_model_parallel_world_size,
@@ -267,9 +266,6 @@ def _dp_gather_via_all_reduce(
             local_tokens.untyped_storage() is not global_tokens.untyped_storage()
         ), "aliasing between global_tokens and local_tokens not allowed"
         
-        # if is_cuda_graph_draft_extend():
-        #     print(f"(rank {torch.distributed.get_rank()}) global_tokens: {global_tokens.shape}, local_tokens: {local_tokens.shape}, local_start_pos: {local_start_pos}, local_num_tokens: {local_num_tokens}")
-
         memcpy_triton(
             global_tokens, local_tokens, 0, local_start_pos, local_num_tokens, False
         )
@@ -346,8 +342,6 @@ def dp_scatter(
         assert (
             local_tokens.untyped_storage() is not global_tokens.untyped_storage()
         ), "aliasing between local_tokens and global_tokens not allowed"
-        
-        # print(f"local_tokens: {local_tokens.shape}, global_tokens: {global_tokens.shape}, local_start_pos: {local_start_pos}, local_num_tokens: {local_num_tokens}")
 
         memcpy_triton(
             local_tokens, global_tokens, 0, local_start_pos, local_num_tokens, True

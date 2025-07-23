@@ -1574,8 +1574,6 @@ class ModelRunner:
             and self.cuda_graph_runner
             and self.cuda_graph_runner.can_run(forward_batch)
         )
-        # from sglang.srt.layers.dp_attention import get_attention_dp_rank
-        # print(f"(rank {get_attention_dp_rank()}) can_run_cuda_graph: {can_run_cuda_graph}")
         if can_run_cuda_graph:
             ret = self.cuda_graph_runner.replay(
                 forward_batch,
@@ -1612,7 +1610,7 @@ class ModelRunner:
             raise ValueError(f"Invalid forward mode: {forward_batch.forward_mode}")
 
         if forward_batch.global_num_tokens_cpu is not None:
-            forward_batch.post_forward_mlp_sync_batch(self, ret)
+            forward_batch.post_forward_mlp_sync_batch(ret)
 
         return ret, can_run_cuda_graph
 
