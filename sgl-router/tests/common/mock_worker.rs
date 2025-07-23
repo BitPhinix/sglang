@@ -229,7 +229,10 @@ async fn generate_handler(
 
         tokio::spawn(async move {
             let tokens = vec!["This ", "is ", "a ", "mock ", "response."];
-            let timestamp_start = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs_f64();
+            let timestamp_start = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_secs_f64();
 
             for (i, token) in tokens.iter().enumerate() {
                 let chunk = json!({
@@ -248,7 +251,14 @@ async fn generate_handler(
                     }
                 });
 
-                if tx.send(format!("data: {}\n\n", serde_json::to_string(&chunk).unwrap())).await.is_err() {
+                if tx
+                    .send(format!(
+                        "data: {}\n\n",
+                        serde_json::to_string(&chunk).unwrap()
+                    ))
+                    .await
+                    .is_err()
+                {
                     break;
                 }
 
@@ -269,7 +279,10 @@ async fn generate_handler(
     } else {
         // Return non-streaming response matching sglang format
         let request_id = format!("mock-req-{}", rand::random::<u32>());
-        let timestamp_start = SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_secs_f64();
+        let timestamp_start = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs_f64();
 
         HttpResponse::Ok().json(json!({
             "text": "Mock generated response for the input",
