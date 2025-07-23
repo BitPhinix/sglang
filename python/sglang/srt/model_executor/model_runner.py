@@ -1585,6 +1585,11 @@ class ModelRunner:
         # For MLP sync
         if forward_batch.global_num_tokens_cpu is not None:
             forward_batch.prepare_mlp_sync_batch(self)
+            
+        from sglang.srt.layers.dp_attention import get_attention_tp_size
+        assert forward_batch.input_ids.shape[0] % get_attention_tp_size() == 0, \
+            f"input_ids.shape[0] {forward_batch.input_ids.shape[0]} is not divisible by attn_tp_size {get_attention_tp_size()}, " \
+            f"global_num_tokens_cpu: {forward_batch.global_num_tokens_cpu}"
 
         if forward_batch.forward_mode.is_decode():
             ret = self.forward_decode(
