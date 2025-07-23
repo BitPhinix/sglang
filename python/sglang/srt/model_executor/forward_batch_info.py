@@ -659,17 +659,12 @@ class ForwardBatch:
         bs = self.batch_size
         if len(global_num_tokens) > 1:
             num_tokens = global_num_tokens[get_attention_dp_rank()]
-            # num_tokens_for_logprob = global_num_tokens_for_logprob[
-            #     get_attention_dp_rank()
-            # ]
         else:
             num_tokens = global_num_tokens[0]
-            # num_tokens_for_logprob = global_num_tokens_for_logprob[0]
         
         # padding
         self.input_ids = self._pad_tensor_to_size(self.input_ids, num_tokens)
         self.req_pool_indices = self._pad_tensor_to_size(self.req_pool_indices, bs)
-
 
         seq_len_fill_value = model_runner.attn_backend.get_cuda_graph_seq_len_fill_value()
         self.seq_lens = self._pad_tensor_to_size(self.seq_lens, bs, value=seq_len_fill_value)
@@ -706,6 +701,8 @@ class ForwardBatch:
             self.spec_info, EagleDraftInput
         ):
             spec_info = self.spec_info
+            self.output_cache_loc_backup = self.out_cache_loc
+            self.hidden_states_backup = spec_info.hidden_states
             if spec_info.topk_p is not None:
                 spec_info.topk_p = self._pad_tensor_to_size(spec_info.topk_p, bs)
             if spec_info.topk_index is not None:
@@ -728,12 +725,15 @@ class ForwardBatch:
         
         if self.spec_info is not None:
             if self.forward_mode.is_decode(): # draft
-                num_tokens = bs * self.spec_info.num_tokens_per_batch
+                num_tokens = self.hidden_states_backup.shape[0]
+                # num_tokens = bs * self.spec_info.num_tokens_per_batch
                 self.positions = self.positions[:num_tokens]
                 self.seq_lens = self.seq_lens[:bs]
                 self.req_pool_indices = self.req_pool_indices[:bs]
                 if self.seq_lens_cpu is not None:
                     self.seq_lens_cpu = self.seq_lens_cpu[:bs]
+                logits_output.next_token_logits = logits_output.next_token_logits[:num_tokens]
+                logits_output.hidden_states = logits_output.hidden_states[:num_tokens]
             elif self.forward_mode.is_target_verify(): # verify
                 num_tokens = bs * self.spec_info.draft_token_num
                 logits_output.next_token_logits = logits_output.next_token_logits[:num_tokens]
@@ -742,9 +742,15 @@ class ForwardBatch:
                 self.spec_info.accept_length = self.spec_info.accept_length[:bs]
                 logits_output.next_token_logits = logits_output.next_token_logits[:bs]
                 logits_output.hidden_states = logits_output.hidden_states[:bs]
-            elif self.forward_mode.is_extend():
+            elif self.forward_mode.is_extend() or self.forward_mode.is_idle():
                 logits_output.next_token_logits = logits_output.next_token_logits[:bs]
                 logits_output.hidden_states = logits_output.hidden_states[:bs]
+
+            if hasattr(self, "hidden_states_backup"):
+                self.spec_info.hidden_states = self.hidden_states_backup
+            if hasattr(self, "output_cache_loc_backup"):
+                self.out_cache_loc = self.output_cache_loc_backup
+
         elif self.forward_mode.is_decode() or self.forward_mode.is_idle():
             logits_output.next_token_logits = logits_output.next_token_logits[:bs]
             if logits_output.hidden_states is not None:

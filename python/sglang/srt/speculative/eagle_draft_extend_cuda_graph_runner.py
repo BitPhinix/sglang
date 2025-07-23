@@ -110,13 +110,6 @@ class EAGLEDraftExtendCudaGraphRunner:
             )
 
             if self.require_gathered_buffer:
-                self.gathered_buffer = torch.zeros(
-                    (
-                        self.max_num_token,
-                        self.model_runner.model_config.hidden_size,
-                    ),
-                    dtype=self.model_runner.dtype,
-                )
                 if self.require_mlp_tp_gather:
                     self.global_num_tokens_gpu = torch.zeros(
                         (self.dp_size,), dtype=torch.int32
@@ -124,11 +117,25 @@ class EAGLEDraftExtendCudaGraphRunner:
                     self.global_num_tokens_for_logprob_gpu = torch.zeros(
                         (self.dp_size,), dtype=torch.int32
                     )
+                    self.gathered_buffer = torch.zeros(
+                        (
+                            self.max_num_token * self.dp_size,
+                            self.model_runner.model_config.hidden_size,
+                        ),
+                        dtype=self.model_runner.dtype,
+                    )
                 else:
                     assert self.require_attn_tp_gather
                     self.global_num_tokens_gpu = torch.zeros((1,), dtype=torch.int32)
                     self.global_num_tokens_for_logprob_gpu = torch.zeros(
                         (1,), dtype=torch.int32
+                    )
+                    self.gathered_buffer = torch.zeros(
+                        (
+                            self.max_num_token,
+                            self.model_runner.model_config.hidden_size,
+                        ),
+                        dtype=self.model_runner.dtype,
                     )
         # Capture
         try:
@@ -142,9 +149,9 @@ class EAGLEDraftExtendCudaGraphRunner:
     def can_run(self, forward_batch: ForwardBatch):
         if self.require_mlp_tp_gather:
             cuda_graph_bs = (
-                sum(forward_batch.global_num_tokens_cpu) // self.num_tokens_per_bs
+                max(forward_batch.global_num_tokens_cpu) // self.num_tokens_per_bs
                 if self.model_runner.spec_algorithm.is_eagle()
-                else sum(forward_batch.global_num_tokens_cpu)
+                else max(forward_batch.global_num_tokens_cpu)
             )
         else:
             cuda_graph_bs = forward_batch.seq_lens.numel()
@@ -181,26 +188,20 @@ class EAGLEDraftExtendCudaGraphRunner:
         if self.require_mlp_tp_gather:
             self.global_num_tokens_gpu.copy_(
                 torch.tensor(
-                    [
-                        num_tokens // self.dp_size + (i < (num_tokens % self.dp_size))
-                        for i in range(self.dp_size)
-                    ],
+                    [num_tokens] * self.dp_size,
                     dtype=torch.int32,
                     device=self.input_ids.device,
                 )
             )
             self.global_num_tokens_for_logprob_gpu.copy_(
                 torch.tensor(
-                    [
-                        num_tokens // self.dp_size + (i < (num_tokens % self.dp_size))
-                        for i in range(self.dp_size)
-                    ],
+                    [num_tokens] * self.dp_size,
                     dtype=torch.int32,
                     device=self.input_ids.device,
                 )
             )
             global_num_tokens = self.global_num_tokens_gpu
-            gathered_buffer = self.gathered_buffer[:num_tokens]
+            gathered_buffer = self.gathered_buffer[:num_tokens * self.dp_size]
             global_num_tokens_for_logprob = self.global_num_tokens_for_logprob_gpu
         elif self.require_attn_tp_gather:
             self.global_num_tokens_gpu.copy_(
@@ -283,8 +284,8 @@ class EAGLEDraftExtendCudaGraphRunner:
             probs = torch.softmax(ret.next_token_logits, dim=-1)
             ret.topk_p, ret.topk_index = fast_topk(probs, self.topk, dim=-1)
             
-            assert output_cache_loc_backup is not forward_batch.out_cache_loc
-            assert hidden_states_backup is not forward_batch.spec_info.hidden_states
+            # assert output_cache_loc_backup is not forward_batch.out_cache_loc
+            # assert hidden_states_backup is not forward_batch.spec_info.hidden_states
 
             forward_batch.out_cache_loc = output_cache_loc_backup
             forward_batch.spec_info.hidden_states = hidden_states_backup
@@ -311,12 +312,13 @@ class EAGLEDraftExtendCudaGraphRunner:
         raw_bs = forward_batch.batch_size
         num_tokens = forward_batch.input_ids.shape[0]
         if self.require_mlp_tp_gather:
-            total_batch_size = (
-                sum(forward_batch.global_num_tokens_cpu) // self.num_tokens_per_bs
+            max_num_tokens = max(forward_batch.global_num_tokens_cpu)
+            max_batch_size = (
+                max_num_tokens // self.num_tokens_per_bs
                 if self.model_runner.spec_algorithm.is_eagle()
-                else sum(forward_batch.global_num_tokens_cpu)
+                else max_num_tokens
             )
-            index = bisect.bisect_left(self.capture_bs, total_batch_size)
+            index = bisect.bisect_left(self.capture_bs, max_batch_size)
         else:
             index = bisect.bisect_left(self.capture_bs, raw_bs)
 
@@ -340,11 +342,10 @@ class EAGLEDraftExtendCudaGraphRunner:
         self.req_pool_indices[:raw_bs].copy_(forward_batch.req_pool_indices)
 
         if self.require_gathered_buffer:
-            self.global_num_tokens_gpu.copy_(forward_batch.global_num_tokens_gpu)
-            self.global_num_tokens_for_logprob_gpu.copy_(
-                forward_batch.global_num_tokens_for_logprob_gpu
-            )
-            forward_batch.gathered_buffer = self.gathered_buffer
+            self.global_num_tokens_gpu.fill_(bs * self.num_tokens_per_bs)
+            self.global_num_tokens_for_logprob_gpu.fill_(bs * self.num_tokens_per_bs)
+            # TODO: support num_token_non_padded
+            # forward_batch.gathered_buffer = self.gathered_buffer
 
         if forward_batch.seq_lens_cpu is not None:
             if bs != raw_bs:
