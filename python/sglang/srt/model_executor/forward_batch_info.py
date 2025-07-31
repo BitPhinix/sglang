@@ -37,7 +37,6 @@ from typing import TYPE_CHECKING, Dict, List, Optional, Tuple, Union
 import torch
 import triton
 import triton.language as tl
-
 from sglang.srt.layers.dp_attention import (
     DPPaddingMode,
     get_attention_dp_rank,
@@ -609,7 +608,6 @@ class ForwardBatch:
             )
 
     def prepare_mlp_sync_batch(self, model_runner: ModelRunner):
-
         from sglang.srt.speculative.eagle_utils import EagleDraftInput
 
         assert self.global_num_tokens_cpu is not None
@@ -665,7 +663,9 @@ class ForwardBatch:
                 self.seq_lens_cpu, bs, value=seq_len_fill_value
             )
 
-        self.out_cache_loc = self._pad_tensor_to_size(self.out_cache_loc, num_tokens)
+        self.out_cache_loc = self._pad_tensor_to_size(
+            self.out_cache_loc, num_tokens, value=-1
+        )
         if self.encoder_lens is not None:
             self.encoder_lens = self._pad_tensor_to_size(self.encoder_lens, bs)
         self.positions = self._pad_tensor_to_size(self.positions, num_tokens)
@@ -699,7 +699,6 @@ class ForwardBatch:
             )
 
     def post_forward_mlp_sync_batch(self, logits_output: LogitsProcessorOutput):
-
         bs = self.batch_size
 
         if self.spec_info is not None:
@@ -776,7 +775,6 @@ class ForwardBatch:
     # Called before each attention module if using chunked kv cache for prefill
     # Some of the codes are adapted from https://github.com/vllm-project/vllm/blob/main/vllm/v1/attention/backends/mla/common.py
     def prepare_chunked_prefix_cache_info(self, device: torch.device):
-
         from sglang.srt.mem_cache.memory_pool import MLATokenToKVPool
 
         assert isinstance(
