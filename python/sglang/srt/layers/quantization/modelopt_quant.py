@@ -1,13 +1,10 @@
 # Adapted from https://github.com/vllm-project/vllm/blob/main/vllm/model_executor/layers/quantization/modelopt.py
 from __future__ import annotations
 
-import importlib.util
 import logging
-from typing import TYPE_CHECKING, Any, Callable, Dict, List, Optional, Union
+from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
 import torch
-from torch.nn.parameter import Parameter
-
 from sglang.srt.layers.moe.cutlass_moe_params import CutlassMoEParams, CutlassMoEType
 from sglang.srt.layers.moe.utils import should_use_flashinfer_trtllm_moe
 from sglang.srt.layers.parameter import ModelWeightParameter, PerTensorScaleParameter
@@ -33,6 +30,7 @@ from sglang.srt.layers.quantization.utils import (
 from sglang.srt.layers.radix_attention import RadixAttention
 from sglang.srt.managers.schedule_batch import global_server_args_dict
 from sglang.srt.utils import is_cuda, next_power_of_2
+from torch.nn.parameter import Parameter
 
 if TYPE_CHECKING:
     from sglang.srt.layers.moe.topk import TopKOutput
@@ -133,7 +131,6 @@ class ModelOptFp8Config(QuantizationConfig):
     def get_quant_method(
         self, layer: torch.nn.Module, prefix: str
     ) -> Optional[QuantizeMethodBase]:
-
         from sglang.srt.layers.linear import LinearBase
         from sglang.srt.layers.moe.fused_moe_triton import FusedMoE
 
@@ -493,9 +490,9 @@ class ModelOptFp4Config(QuantizationConfig):
     def from_config(cls, config: Dict[str, Any]) -> ModelOptFp4Config:
         quant_config = cls.get_from_keys(config, ["quantization"])
         quant_method = quant_config["quant_algo"]
-        if not quant_method in ["FP8", "NVFP4"]:
+        if quant_method not in ["FP8", "NVFP4"]:
             raise ValueError(
-                f"ModelOpt currently only supports: FP8, NVFP4"
+                "ModelOpt currently only supports: FP8, NVFP4"
                 " quantizations in sglang. Please check the "
                 "`hf_quant_config.json` file for your model's "
                 "quant configuration."
@@ -776,7 +773,7 @@ class ModelOptNvFp4FusedMoEMethod(FusedMoEMethodBase):
         # GEMM 1
         w13_weight = ModelWeightParameter(
             data=torch.empty(
-                layer.local_num_experts,
+                layer.num_local_experts,
                 2 * intermediate_size_per_partition,
                 # 2 fp4 items are packed in the input dimension
                 hidden_size // 2,
@@ -903,10 +900,6 @@ class ModelOptNvFp4FusedMoEMethod(FusedMoEMethodBase):
         num_experts,
     ):
         from flashinfer import (
-            RoutingMethodType,
-            e2m1_and_ufp8sf_scale_to_float,
-            fp4_quantize,
-            next_positive_power_of_2,
             reorder_rows_for_gated_act_gemm,
             shuffle_matrix_a,
             shuffle_matrix_sf_a,
