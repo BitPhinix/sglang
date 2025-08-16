@@ -19,9 +19,6 @@ from typing import Any, Dict, Iterable, Optional, Tuple
 
 import torch
 import torch.nn.functional as F
-from torch import nn
-from transformers import PretrainedConfig
-
 from sglang.srt.distributed import (
     get_moe_expert_parallel_world_size,
     get_tensor_model_parallel_rank,
@@ -43,10 +40,8 @@ from sglang.srt.layers.dp_attention import (
 )
 from sglang.srt.layers.layernorm import RMSNorm
 from sglang.srt.layers.linear import (
-    ColumnParallelLinear,
     MergedColumnParallelLinear,
     QKVParallelLinear,
-    ReplicatedLinear,
     RowParallelLinear,
 )
 from sglang.srt.layers.logits_processor import LogitsProcessor
@@ -57,8 +52,6 @@ from sglang.srt.layers.moe.topk import TopK
 from sglang.srt.layers.quantization.base_config import QuantizationConfig
 from sglang.srt.layers.quantization.fp8_kernel import (
     is_fp8_fnuz,
-    per_tensor_quant_mla_fp8,
-    per_token_group_quant_mla_deep_gemm_masked_fp8,
 )
 from sglang.srt.layers.radix_attention import RadixAttention
 from sglang.srt.layers.rotary_embedding import get_rope
@@ -81,19 +74,17 @@ from sglang.srt.utils import (
     BumpAllocator,
     LazyValue,
     add_prefix,
-    bind_or_assign,
     cpu_has_amx_support,
     get_bool_env_var,
     get_device_sm,
-    get_int_env_var,
     is_cpu,
     is_cuda,
-    is_flashinfer_available,
     is_hip,
-    is_non_idle_and_non_empty,
     log_info_on_rank0,
     use_intel_amx_backend,
 )
+from torch import nn
+from transformers import PretrainedConfig
 
 _is_hip = is_hip()
 _is_cuda = is_cuda()
@@ -109,6 +100,19 @@ elif _is_cpu and _is_cpu_amx_available:
     pass
 
 logger = logging.getLogger(__name__)
+
+ignore_suffixes = (
+    ".bias",
+    "_bias",
+    ".k_scale",
+    "_k_scale",
+    ".v_scale",
+    "_v_scale",
+    ".weight_scale",
+    "_weight_scale",
+    ".input_scale",
+    "_input_scale",
+)
 
 
 class Glm4MoeMLP(nn.Module):
@@ -501,7 +505,6 @@ class Glm4MoeSparseMoeBlock(DeepseekV2MoE):
         should_allreduce_fusion: bool = False,
         use_reduce_scatter: bool = False,
     ) -> torch.Tensor:
-
         current_stream = torch.cuda.current_stream()
         self.alt_stream.wait_stream(current_stream)
         shared_output = self._forward_shared_experts(hidden_states)
@@ -723,7 +726,6 @@ class Glm4MoeModel(DeepseekV2Model):
 
 
 class Glm4MoeForCausalLM(DeepseekV2ForCausalLM):
-
     def __init__(
         self,
         config: PretrainedConfig,
@@ -790,7 +792,6 @@ class Glm4MoeForCausalLM(DeepseekV2ForCausalLM):
         return self.model.embed_tokens
 
     def load_weights(self, weights: Iterable[Tuple[str, torch.Tensor]], is_nextn=False):
-
         if is_nextn:
             if hasattr(self.config, "num_nextn_predict_layers"):
                 num_nextn_layers = self.config.num_nextn_predict_layers
@@ -982,7 +983,7 @@ class Glm4MoeForCausalLM(DeepseekV2ForCausalLM):
                     continue
                 name = name.replace(weight_name, param_name)
                 # Skip loading extra bias for GPTQ models.
-                if name.endswith(".bias") and name not in params_dict:
+                if name.endswith(ignore_suffixes) and name not in params_dict:
                     continue
                 param = params_dict[name]
                 weight_loader = param.weight_loader
@@ -1006,7 +1007,7 @@ class Glm4MoeForCausalLM(DeepseekV2ForCausalLM):
                     break
                 else:
                     # Skip loading extra bias for GPTQ models.
-                    if name.endswith(".bias") and name not in params_dict:
+                    if name.endswith(ignore_suffixes) and name not in params_dict:
                         continue
                     if fuse_qkv_a_proj and (
                         "q_a_proj" in name or "kv_a_proj_with_mqa" in name
